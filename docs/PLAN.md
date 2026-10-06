@@ -3,6 +3,8 @@ PLAN: "feat: msgtype — message classification moved out of webtyp.com/fmt"
 TAG: v0.1.0
 EXECUTOR: jules
 REVIEWER: none
+STATUS: running
+SESSION: 14815669336747803909
 ---
 
 > This plan is dispatched via the CodeJob workflow. See skill: agents-workflow.
