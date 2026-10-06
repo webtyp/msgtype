@@ -1,139 +1,99 @@
-package fmt
+package msgtype
 
-// MessageType represents the classification of message types in the system.
-type MessageType uint8
+import "webtyp.com/fmt"
 
-// Msg exposes the MessageType constants for external use, following fmt naming convention.
-// Msg exposes the MessageType constants for external use, following fmt naming convention.
-var Msg = struct {
-	Normal  MessageType
-	Info    MessageType
-	Error   MessageType
-	Warning MessageType
-	Success MessageType
+// Type classifies a message for logs and UI. The numeric values travel over
+// SSE: never reorder them; append new types at the end.
+type Type uint8
 
-	// Network/SSE specific (new)
-	Connect   MessageType // Connection error
-	Auth      MessageType // Authentication error
-	Parse     MessageType // Parse/decode error
-	Timeout   MessageType // Timeout error
-	Broadcast MessageType // Broadcast/send error
-	Debug     MessageType // / Debug message
+const (
+	Normal    Type = iota // 0
+	Info                  // 1
+	Error                 // 2
+	Warning               // 3
+	Success               // 4
+	Connect               // 5 connection error
+	Auth                  // 6 authentication error
+	Parse                 // 7 parse/decode error
+	Timeout               // 8 timeout error
+	Broadcast             // 9 broadcast/send error
+	Debug                 // 10
+	Event                 // 11 pub/sub event
+	Request               // 12
+	Response              // 13
+)
 
-	// Pub/Sub & Request/Response (new)
-	Event    MessageType
-	Request  MessageType
-	Response MessageType
-}{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13}
-
-// Helper methods for MessageType
-func (t MessageType) IsNormal() bool   { return t == Msg.Normal }
-func (t MessageType) IsInfo() bool     { return t == Msg.Info }
-func (t MessageType) IsError() bool    { return t == Msg.Error }
-func (t MessageType) IsWarning() bool  { return t == Msg.Warning }
-func (t MessageType) IsSuccess() bool  { return t == Msg.Success }
-func (t MessageType) IsDebug() bool    { return t == Msg.Debug }
-func (t MessageType) IsEvent() bool    { return t == Msg.Event }
-func (t MessageType) IsRequest() bool  { return t == Msg.Request }
-func (t MessageType) IsResponse() bool { return t == Msg.Response }
-
-// Network/SSE helper methods
-func (t MessageType) IsConnect() bool   { return t == Msg.Connect }
-func (t MessageType) IsAuth() bool      { return t == Msg.Auth }
-func (t MessageType) IsParse() bool     { return t == Msg.Parse }
-func (t MessageType) IsTimeout() bool   { return t == Msg.Timeout }
-func (t MessageType) IsBroadcast() bool { return t == Msg.Broadcast }
-
-// IsNetworkError returns true for any network-related error type
-func (t MessageType) IsNetworkError() bool {
-	return t == Msg.Connect || t == Msg.Auth || t == Msg.Timeout || t == Msg.Broadcast
-}
-
-func (t MessageType) String() string {
+// String returns the type's name ("Info", "Error", …; "Normal" for unknown values).
+func (t Type) String() string {
 	switch t {
-	case Msg.Info:
+	case Info:
 		return "Info"
-	case Msg.Error:
+	case Error:
 		return "Error"
-	case Msg.Warning:
+	case Warning:
 		return "Warning"
-	case Msg.Success:
+	case Success:
 		return "Success"
-	case Msg.Connect:
+	case Connect:
 		return "Connect"
-	case Msg.Auth:
+	case Auth:
 		return "Auth"
-	case Msg.Parse:
+	case Parse:
 		return "Parse"
-	case Msg.Timeout:
+	case Timeout:
 		return "Timeout"
-	case Msg.Broadcast:
+	case Broadcast:
 		return "Broadcast"
-	case Msg.Debug:
+	case Debug:
 		return "Debug"
-	case Msg.Event:
+	case Event:
 		return "Event"
-	case Msg.Request:
+	case Request:
 		return "Request"
-	case Msg.Response:
+	case Response:
 		return "Response"
 	default:
 		return "Normal"
 	}
 }
 
-// Pre-compiled patterns for efficient buffer matching
 var (
-	errorPatterns = [][]byte{
-		[]byte("error"), []byte("failed"), []byte("exit status 1"),
-		[]byte("undeclared"), []byte("undefined"), []byte("fatal"),
-	}
-	warningPatterns = [][]byte{
-		[]byte("warning"), []byte("warn"),
-	}
-	debugPatterns = [][]byte{
-		[]byte("debug"),
-	}
-	successPatterns = [][]byte{
-		[]byte("success"), []byte("completed"), []byte("successful"), []byte("done"),
-	}
-	infoPatterns = [][]byte{
-		[]byte("info"), []byte("starting"), []byte("initializing"),
-	}
+	errorPatterns   = []string{"error", "failed", "exit status 1", "undeclared", "undefined", "fatal"}
+	warningPatterns = []string{"warning", "warn"}
+	successPatterns = []string{"success", "completed", "successful", "done"}
+	infoPatterns    = []string{"info", "starting", "initializing"}
+	debugPatterns   = []string{"debug"}
 )
 
-// StringType returns the string from BuffOut and its detected MessageType, then auto-releases the Conv
-func (c *Conv) StringType() (string, MessageType) {
-	// Get string content FIRST (before detection modifies buffer)
-	out := c.GetString(BuffOut)
-	// Detect type from BuffOut content
-	msgType := c.detectMessageTypeFromBuffer(BuffOut)
-	// Auto-release
-	c.putConv()
-	return out, msgType
-}
-
-// detectMessageTypeFromBuffer analyzes the buffer content and returns the detected MessageType (zero allocations)
-func (c *Conv) detectMessageTypeFromBuffer(dest BuffDest) MessageType {
-	// 1. Copy content directly to work buffer using swapBuff (zero allocations)
-	c.swapBuff(dest, BuffWork)
-	// 2. Convert to lowercase in work buffer using existing method
-	c.changeCase(true, BuffWork)
-	// 3. Direct buffer pattern matching - NO Contains() allocations
-	if c.bufferContainsPattern(BuffWork, errorPatterns) {
-		return Msg.Error
+// Detect guesses the type of a log line from its words, case-insensitively.
+// Checked in this order, first hit wins: Error, Warning, Success, Info, Debug;
+// otherwise Normal.
+func Detect(text string) Type {
+	lower := fmt.ToLower(text)
+	for _, p := range errorPatterns {
+		if fmt.Contains(lower, p) {
+			return Error
+		}
 	}
-	if c.bufferContainsPattern(BuffWork, warningPatterns) {
-		return Msg.Warning
+	for _, p := range warningPatterns {
+		if fmt.Contains(lower, p) {
+			return Warning
+		}
 	}
-	if c.bufferContainsPattern(BuffWork, successPatterns) {
-		return Msg.Success
+	for _, p := range successPatterns {
+		if fmt.Contains(lower, p) {
+			return Success
+		}
 	}
-	if c.bufferContainsPattern(BuffWork, infoPatterns) {
-		return Msg.Info
+	for _, p := range infoPatterns {
+		if fmt.Contains(lower, p) {
+			return Info
+		}
 	}
-	if c.bufferContainsPattern(BuffWork, debugPatterns) {
-		return Msg.Debug
+	for _, p := range debugPatterns {
+		if fmt.Contains(lower, p) {
+			return Debug
+		}
 	}
-	return Msg.Normal
+	return Normal
 }
